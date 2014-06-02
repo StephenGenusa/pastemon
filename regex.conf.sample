@@ -3,37 +3,139 @@
 //-->
 
 <config>
+
+<!--
+        Programming Sourcecode
+//-->
+
         <regex>
-                <search>rootshell\.be</search>
+            <search><![CDATA[<script]]></search>
+			<reg_type>script</reg_type>
+        </regex>
+		
+        <regex>
+            <search>NSString</search>
+			<reg_type>objective-c</reg_type>
+        </regex>
+		
+        <regex>
+            <search>#include\ <![CDATA[<]]>.{0,20}\.h<![CDATA[>]]></search>
+			<reg_type>c_cpp</reg_type>
+        </regex>
+		
+        <regex>
+            <search>#!.{0,30}python</search>
+			<reg_type>python</reg_type>
+        </regex>
+		
+        <regex>
+            <search>if __name__</search>
+			<reg_type>python</reg_type>
+        </regex>		
+		
+        <regex>
+            <search>#!.{0,30}perl</search>
+			<reg_type>perl</reg_type>
+        </regex>
+		
+        <regex>
+            <search><![CDATA[<\?php]]></search>
+			<reg_type>php</reg_type>
+        </regex>
+		
+        <regex>
+            <search><![CDATA[<]]>cfoutput</search>
+			<reg_type>coldfusion</reg_type>
+        </regex>
+		
+		
+        <regex>
+            <search>class\(TForm\)</search>
+			<reg_type>delphi</reg_type>
         </regex>
         <regex>
-                <search>anonbelgium</search>
+            <search>^unit.{0,30};</search>
+			<include>implementation</include>
+			<reg_type>delphi</reg_type>
+        </regex>
+		
+		
+        <regex>
+            <search>use HTTP::Request;</search>
+			<reg_type>perl</reg_type>
+        </regex>
+		
+        <regex>
+            <search>#DefineSubroutine</search>
+			<reg_type>winbatch</reg_type>
         </regex>
         <regex>
-                <search>-----BEGIN (RSA|DSA) PRIVATE KEY-----</search>
+            <search>#DefineFunction</search>
+			<reg_type>winbatch</reg_type>
+        </regex>
+		
+        <regex>
+            <search>Public\ Declare</search>
+			<include>End\ Sub</include>
+			<reg_type>vb</reg_type>
+        </regex>
+
+        <regex>
+            <search>-module\(.{2,30}\)\.</search>
+			<reg_type>erlang</reg_type>
+        </regex>
+
+		
+<!--
+        DATABASE
+//-->
+        <regex>
+            <search>-- phpMyAdmin SQL Dump</search>
+			<reg_type>db</reg_type>
+			<alarm>no</alarm>
         </regex>
         <regex>
-                <search>-- phpMyAdmin SQL Dump</search>
+            <search>-- MySQL dump</search>
+			<reg_type>db</reg_type>
+			<alarm>no</alarm>
         </regex>
+        <regex>
+            <search>INSERT INTO</search>
+			<reg_type>db</reg_type>
+			<alarm>no</alarm>
+        </regex>
+        <regex>
+            <search>CREATE TABLE</search>
+			<reg_type>db</reg_type>
+			<alarm>no</alarm>
+        </regex>
+	
 	<!--
 	Example of exclusion: search for "belgium" without "france" in the same pastie
-	//-->
         <regex>
-                <search>belgium</search>
-		<exclude>france</exclude>
+            <search>belgium</search>
+			<exclude>france</exclude>
+			<reg_type>city</reg_type>
+			<alarm>no</alarm>
         </regex>
-	<!--
-	Example fo inclusion: search for belgium" and "luxembourg" in the same pastie
-	//-->
+
+	Example of inclusion: search for belgium" and "luxembourg" in the same pastie
         <regex>
-                <search>belgium</search>
-		<include>luxembourg</include>
+            <search>belgium</search>
+			<include>luxembourg</include>
+			<reg_type>city</reg_type>
+			<alarm>no</alarm>
         </regex>
-	<!--
+		
 	Example of match 5 IP addresses
+		<regex>
+			<search>\d+\.\d+\.\d+\.\d+</search>
+			<count>5</count>
+			<reg_type>IPs</reg_type>
+			<alarm>no</alarm>
+		</regex>
+		
 	//-->
-	<regex>
-		<search>\d+\.\d+\.\d+\.\d+</search>
-		<count>5</count>
-	</regex>
+	
+	
 </config>
