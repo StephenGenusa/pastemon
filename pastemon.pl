@@ -55,6 +55,7 @@ use XML::XPath;
 use XML::XPath::XMLParser;
 use Net::SMTP;
 use POSIX qw(setsid);
+use if $^O eq 'MSWin32', 'Win32::Sound';
 
 # Optional modules
 my $haveWordPressXMLRMC 	= eval "use WordPress::XMLRPC; 1";
@@ -76,10 +77,11 @@ my @webSiteNames = ( 			# Self-defined names for multiple usages
 	);
 
 my $program = "pastemon.pl";
-my $version = "v1.14";
+my $version = "v1.14b";
 my $debug;
 my $help;
 my $ignoreCase;		# By default respect case in strings search
+my $mediaFile = "";
 my $cefDestination;	# Send CEF events to this destination:port
 my $cefPort = 514;
 my $cefSeverity = 3;
@@ -91,10 +93,17 @@ my $maxPasties = 1000;	# TODO: Make it configurable?
 my @regexList;		# List of interesting regex (with the data)
 my $pidFile 	= "/var/run/pastemon.pid";
 my $configFile	= "/etc/pastemon.conf";		# Main XML configuration file
+
+if ($^O eq 'MSWin32') {
+	$pidFile 	= "pastemon.pid";
+	$configFile	= "pastemon.conf";		# Main XML configuration file
+} 
+
 my $regexFile;		# Regular expressions definitions
 my $wpConfigFile;
 my $proxyFile;
 my @proxies;
+my $disableBadProxies = 0;
 
 my $uaFile;
 my @uas;
@@ -142,6 +151,12 @@ my $result = GetOptions(
 	"config=s"		=> \$configFile,
 );
 
+print "$program version $version, the pastie monitoring script by Xavier Mertens\n";
+print "Original Python script by Xavier Garcia (shellguardians.com)\n";
+print "Perl script rewrite with new features by by Xavier Mertens (rootshell.be)\n";
+print "Win32 enabled version with new features by Stephen Genusa (development.genusa.com)\n\n";
+
+
 # TODO: Add a "--drop-sql-table" option to rebuild a fresh DB?
 if ($help) {
 	print <<__HELP__;
@@ -156,9 +171,11 @@ __HELP__
 
 parseXMLConfigFile($configFile);
 
-($debug) && print STDERR "+++ Running in foreground.\n";
+stdErrDebugOutput("+++ Running in foreground.");
 
-($cefDestination) && syslogOutput("Sending CEF events to $cefDestination:$cefPort (severity $cefSeverity)");
+($mediaFile) && syslogOutput("+++ Audio alarm media file is $mediaFile");
+
+($cefDestination) && syslogOutput("+++ Sending CEF events to $cefDestination:$cefPort (severity $cefSeverity)");
 
 # Do not allow multiple running instances!
 if (-r $pidFile) {
@@ -177,14 +194,14 @@ if (!$debug) {
 	exit(0) if $pid;
 
 	# We are the child
-	(POSIX::setsid != -1) or die "setsid failed";
+	#(POSIX::setsid != -1) or die "setsid failed";
 	chdir("/") || die "Cannot changed working directory to /";
 	close(STDOUT);
 	close(STDOUT);
 	close(STDIN);
 }
 
-syslogOutput("Running with PID $$");
+syslogOutput("+++ Running with PID $$");
 open(PIDH, ">$pidFile") || die "Cannot write PID file $pidFile: $!";
 print PIDH "$$";
 close(PIDH);
@@ -192,7 +209,7 @@ close(PIDH);
 # Notify if HTTP proxy settings detected
 if ($ENV{'HTTP_PROXY'}) {
 	($proxyFile) && die "The HTTP_PROXY environment variable conflicts with the use of a proxies list";
-	syslogOutput("Using detected HTTP proxy: " . $ENV{'HTTP_PROXY'});
+	syslogOutput("+++ Using detected HTTP proxy: " . $ENV{'HTTP_PROXY'});
 }
 
 my @threads;
@@ -202,7 +219,7 @@ my @webSites;
 ($checkNopaste) && push(@webSites, NOPASTE);
 ($checkPastesite) && push(@webSites, PASTESITE);
 
-# Launch threads based on the number of webistes to monitor
+# Launch threads based on the number of websites to monitor
 for my $webSite (@webSites) {
 	my $t = threads->new(\&mainLoop, $webSite);
 	push(@threads, $t);
@@ -221,7 +238,7 @@ $SIG{'USR1'}	= sub {
 while(1) {
 	sleep(1);
 	if ($caught) {
-		syslogOutput("Killing my threads");
+		syslogOutput("+++ Killing my threads");
 		foreach my $t (@threads) {
 			$t->kill('SIGKILL');
 		}
@@ -240,27 +257,31 @@ sub mainLoop {
 	while(1) {
 		my $pastie;
 		if (!&fetchLastPasties($webSite)) {
+		    print STDERR localtime() . " Postings from " . @webSiteNames[$webSite] . " retrieved.\n";
 			foreach $pastie (@pasties) {
 				exit 0 if ($caught == 1);
 				analyzePastie($webSite, $pastie, PROCESS_URL);
 			}
 			exit 0 if ($caught == 1);
+		} else
+		{
+		  print STDERR localtime() . " ---Failed to update " . @webSiteNames[$webSite] . "\n";
 		}
 		purgeOldPasties($maxPasties);
 
 		# Wait some seconds (depending on the website)
 		DELAY: {
 			$webSite == PASTEBIN	&& do { 
-							($debug) && print STDERR "Sleeping $delayPastebin\n"; 
+							stdErrDebugOutput("Sleeping $delayPastebin " . @webSiteNames[$webSite]); 
 							sleep($delayPastebin); last DELAY; };
 			$webSite == PASTIE	&& do {
-							($debug) && print STDERR "Sleeping $delayPastie\n";
+							stdErrDebugOutput("Sleeping $delayPastie " . @webSiteNames[$webSite]);
 							sleep($delayPastie); last DELAY; };
 			$webSite == NOPASTE	&& do {
-							($debug) && print STDERR "Sleeping $delayNopaste\n";
+							stdErrDebugOutput("Sleeping $delayNopaste " . @webSiteNames[$webSite]);
 							sleep($delayNopaste); last DELAY; };
 			$webSite == PASTESITE	&& do {
-							($debug) && print STDERR "Sleeping $delayPastesite\n";
+							stdErrDebugOutput("Sleeping $delayPastesite " . @webSiteNames[$webSite]);
 							sleep($delayPastesite); last DELAY; };
 		}
 	}
@@ -280,7 +301,7 @@ sub analyzePastie {
 		if ($content) {
 			# If we receive a "slow down" message, follow Pastebin recommandation!
 			if ($content =~ /Please slow down/) {
-				($debug) &&  print STDERR "+++ Slow down message received. Paused 5 seconds\n";
+				stdErrDebugOutput("+++ Slow down message received. Paused 5 seconds");
 				sleep(5);
 			}
 			else {
@@ -294,12 +315,16 @@ sub analyzePastie {
 					my $regexExclude;
 					my $regexDesc;
 					my $regexCount;
+					my $regexRegType;
+					my $regexAlarm;
 					foreach $regex (@regexList) {
 						$regexSearch	= @$regex[0];
 						$regexInclude	= @$regex[1];
 						$regexExclude	= @$regex[2];
 						$regexDesc	= @$regex[3];
 						$regexCount	= @$regex[4];
+						$regexRegType =	@$regex[5];
+						$regexAlarm = @$regex[6];
 						my $sampleData;
 						my ($startPos, $endPos);
 						my $preCount = 0;
@@ -329,7 +354,7 @@ sub analyzePastie {
 								}
 								if ($postCount) {
 									# Matches for include $regex
-									$matches{$i} = [ ( $regexSearch, $preCount, $sampleData ) ];
+									$matches{$i} = [ ( $regexSearch, $preCount, $sampleData, $regexRegType,  $regexAlarm) ];
 									$i++;
 								}
 							}
@@ -342,12 +367,12 @@ sub analyzePastie {
 								}
 								if (! $postCount) {
 									# Matches for exclude $regex
-									$matches{$i} = [ ( $regexSearch, $preCount, $sampleData ) ];
+									$matches{$i} = [ ( $regexSearch, $preCount, $sampleData, $regexRegType,  $regexAlarm ) ];
 									$i++;
 								}
 							}
 							else {
-								$matches{$i} = [ ( $regexSearch, $preCount, $sampleData ) ];
+								$matches{$i} = [ ( $regexSearch, $preCount, $sampleData, $regexRegType,  $regexAlarm ) ];
 								$i++;
 							}
 						}
@@ -360,25 +385,43 @@ sub analyzePastie {
 						if (!FuzzyMatch($webSite, $content))
 						{
 							# Generate the results based on matches
-							my $buffer = "Found in " . $pastie . " : ";
+							my $buffer = " Found in " . $pastie . " : ";
 							my $key;
+							my $alarm = "";
+							my $reg_type = "";
+							
 							for $key (keys %matches) {
 								$buffer = $buffer . $matches{$key}[0] . " (" . $matches{$key}[1] . " times) ";
+								if ($matches{$key}[4] eq "yes")  { $alarm = $matches{$key}[4] };
+								if ($reg_type eq "") { $reg_type = $matches{$key}[3]; }
 							}
 							if ($sampleSize) {
 								# Optional: Add sample of data
 								my $safeData = $matches{0}[2];
 								# Sanitize the data
-								$safeData =~ s///g;
+								$safeData =~ s/
+//g;
 								$safeData =~ s/\n/\\r/g;
 								$safeData =~ s/\n/\\n/g;
 								$safeData =~ s/\t/\\t/g;
 								$buffer = $buffer . "| Sample: " . $safeData;
 							}
-							syslogOutput($buffer);
+							syslogOutput("+++ " . $buffer);
 	
+							# Generate Audio Alarm (if configured)
+							if ($alarm eq "yes") {
+								 if ($^O eq 'MSWin32') {
+									Win32::Sound::Volume('100%');
+									Win32::Sound::Play($mediaFile);
+								} else
+								{ # TODO: Other Platform Audio Support
+								}
+							}
+							
+							
 							# Generating CEF event (if configured)
 							($cefDestination) && sendCEFEvent($pastie);
+		
 		
 							# Generating blog post (if configured)
 							($wpSite) && createBlogPost($pastie);
@@ -408,8 +451,10 @@ sub analyzePastie {
 	
 							# Save pastie content in the dump directory (if configured)
 							if ($dumpDir) {
+								$reg_type =~ s/<//;
+								$reg_type =~ s/>//;								
 								my $tempPastie = getPastieID($pastie);
-								my $tempDir = validateDumpDir($webSite, $dumpDir); # Generate and create dump directory
+								my $tempDir = validateDumpDir($webSite, $dumpDir . "/". $reg_type); # Generate and create dump directory
 								(-d $tempDir) or die "Cannot validate directory $dumpDir: $!";
 								open(DUMP, ">:encoding(UTF-8)", "$tempDir/$tempPastie.raw") or die "Cannot write to $tempDir/$tempPastie.raw : $!";
 								for $key (keys %matches) {
@@ -425,7 +470,7 @@ sub analyzePastie {
 										unlink("$tempDir/$tempPastie.raw");
 									}
 									else {
-										syslogOutput("Cannot compress $tempDir/$tempPastie.raw: $!");
+										syslogOutput("+++ Cannot compress $tempDir/$tempPastie.raw: $!");
 									}
 								}
 							}
@@ -435,7 +480,7 @@ sub analyzePastie {
 					elsif ($dumpAll && $dumpDir) {
 						# Mirroring mode - dump the pastie in all cases
 						my $tempPastie = getPastieID($pastie);
-						my $tempDir = validateDumpDir($webSite, $dumpDir);
+						my $tempDir = validateDumpDir($webSite, $dumpDir. "/unsorted");
 						(-d $tempDir) or die "Cannot validate directory $tempDir: $!";
 						open(DUMP, ">:encoding(UTF-8)", "$tempDir/$tempPastie.raw") or die "Cannot write to $tempDir/$tempPastie.raw : $!";
 						print DUMP "\n$content";
@@ -448,7 +493,7 @@ sub analyzePastie {
 								unlink("$tempDir/$tempPastie.raw");
 							}
 							else { 
-								syslogOutput("Cannot compress $tempDir/$tempPastie.raw: $!");
+								syslogOutput("--- Cannot compress $tempDir/$tempPastie.raw: $!");
 							}
 						}
 					}
@@ -465,7 +510,7 @@ sub analyzePastie {
 					sleep(int(rand(5)));
 				}
 				else { # MD5 Exists in DB
-					($debug) && print "DEBUG: MD5 $md5 already found in DB!\n";
+					stdErrDebugOutput("MD5 $md5 already found in DB!");
 				}
 			}
 		}
@@ -480,7 +525,7 @@ sub processUrls {
 	while ($pastie =~ m,(http.*?://([^\s)\"](?!ttp:))+),g) { # "
 		my $url = $&;
 		if ($url =~ /$followMatching/gi) { #Process only URLs matching our regex!
-                	($debug) && print "+++ Following URL: $url\n";
+                	stdErrDebugOutput("+++ Following URL: $url");
 			my $ua = LWP::UserAgent->new;
 			$ua->agent(getRandomUA());
 			my $r = $ua->head("$url");
@@ -489,7 +534,7 @@ sub processUrls {
 			}
         	}
 		# Protect us against pastebin.com blacklist?
-		#sleep(int(rand(15)));
+		sleep(int(rand(15)));
 	}
 	return 0;
 }
@@ -504,7 +549,7 @@ sub parseXMLConfigFile {
 	my $configFile = shift;
 	(-r $configFile) || die "Cannot load XML file $configFile: $!";
 
-	($debug) && print STDERR "+++ Loading XML file $configFile.\n";
+	stdErrDebugOutput("+++ Loading XML file $configFile.");
 	my $xml = XML::XPath->new(filename => "$configFile");
 	my $buff;
 
@@ -532,7 +577,7 @@ sub parseXMLConfigFile {
 	undef $checkPastebin;
 	undef $checkPastie;
 	undef $checkNopaste;
-        undef $checkPastesite;
+    undef $checkPastesite;
 	undef $followUrls;
 	undef $followMatching;
 	undef $dbFile;
@@ -543,17 +588,17 @@ sub parseXMLConfigFile {
 		$buff			= $node->find('ignore-case')->string_value;
 		if (lc($buff) eq "yes" || $buff eq "1") {
 			$ignoreCase++;
-			($debug) && print STDERR "+++ Non-sensitive search enabled.\n";
+			stdErrDebugOutput("+++ Non-sensitive search enabled.");
 		}
 		$buff			= $node->find('dump-all')->string_value;
 		if (lc($buff) eq "yes" || $buff eq "1") {
 			$dumpAll++;
-			($debug) && print STDERR "+++ Dumping all pasties (mirror mode).\n";
+			stdErrDebugOutput("+++ Dumping all pasties (mirror mode).");
 		}
 		$buff			= $node->find('compress-pasties')->string_value;
 		if (lc($buff) eq "yes" || $buff eq "1") {
 			$compressDump++;
-			($debug) && print STDERR "+++ Compressing all pasties (mirror mode).\n";
+			stdErrDebugOutput("+++ Compressing all pasties (mirror mode).");
 		}
 		$pidFile		= $node->find('pid-file')->string_value;
 		$regexFile		= $node->find('regex-file')->string_value;
@@ -572,22 +617,22 @@ sub parseXMLConfigFile {
 		$buff			= $node->find('pastebin')->string_value;
 		if (lc($buff) eq "yes" || $buff eq "1") {
 			$checkPastebin++;
-			($debug) && print STDERR "+++ pastebin.com monitoring activated.\n";
+			stdErrDebugOutput("+++ pastebin.com monitoring activated.");
 		}
 		$buff                   = $node->find('pastie')->string_value;
 		if (lc($buff) eq "yes" || $buff eq "1") {
 			$checkPastie++;
-			($debug) && print STDERR "+++ pastie.com monitoring activated.\n";
+			stdErrDebugOutput("+++ pastie.com monitoring activated.");
 		}
 		$buff                   = $node->find('nopaste')->string_value;
 		if (lc($buff) eq "yes" || $buff eq "1") {
 			$checkNopaste++;
-			($debug) && print STDERR "+++ nopaste.me monitoring activated.\n";
+			stdErrDebugOutput("+++ nopaste.me monitoring activated.");
 		}
 		$buff			= $node->find('pastesite')->string_value;
 		if (lc($buff) eq "yes" || $buff eq "1") {
 			$checkPastesite++;
-			($debug) && print STDERR "+++ pastesite.com monitoring activated.\n";
+			stdErrDebugOutput("+++ pastesite.com monitoring activated.");
 		}
 		$delayPastebin	= $node->find('pastebin-delay')->string_value;
 		$delayPastie	= $node->find('pastie-delay')->string_value;
@@ -601,11 +646,17 @@ sub parseXMLConfigFile {
 		$buff			= $node->find('follow')->string_value;
 		if (lc($buff) eq "yes" || $buff eq "1") {
 			$followUrls++;
-			($debug) && print STDERR "+++ Follow URLs feature activated.\n";
+			stdErrDebugOutput("+++ Follow URLs feature activated.");
 		}
 		$followMatching		= $node->find('matching')->string_value;
 	}
 
+	# Audio Parameters
+	my $nodes = $xml->find('/pastemon/audio-output');
+	foreach my $node ($nodes->get_nodelist) {
+		$mediaFile		= $node->find('mediafile')->string_value;
+	}
+	
 	# CEF Parameters
 	my $nodes = $xml->find('/pastemon/cef-output');
 	foreach my $node ($nodes->get_nodelist) {
@@ -651,42 +702,42 @@ sub parseXMLConfigFile {
 	# Check if the provided dump directory is writable to us
 	if ($dumpDir) {
 		# (-w $dumpDir) or die "Directory $dumpDir is not writable: $!";
-		syslogOutput("Using $dumpDir as dump directory");
+		syslogOutput("+++ Using $dumpDir as dump directory");
 	}
 
 	# Compress dumped pasties?
 	if ($compressDump) {
 		if ($haveIOCompressGzip) { # Module IO::Compress::Gzip installed?
 			if (!$dumpDir) {
-				syslogOutput("Option compress-pasties disabled: No dump directory defined");
+				syslogOutput("--- Option compress-pasties disabled: No dump directory defined");
 				undef $compressDump
 			}
 			if (!$haveIOUncompressGunzip) { # Module IO::Compress::Gunzp installed?
-				syslogOutput("Option compress-pasties disabled: IO::Uncompress:Gunzip not installed");
+				syslogOutput("--- Option compress-pasties disabled: IO::Uncompress:Gunzip not installed");
 				undef $compressDump;
 			}
 		}
 		else {
-			syslogOutput("Option compress-pasties disabled: IO::Compress:Gzip not installed");
+			syslogOutput("--- Option compress-pasties disabled: IO::Compress:Gzip not installed");
 			undef $compressDump;
 		}
 	}
 
 	# Dumping all pasties requires a dump directory
 	if ($dumpAll && !$dumpDir) {
-		syslogOutput("No dump directory specified");
+		syslogOutput("--- No dump directory specified");
 	}
 
 	# Verifiy sampleSize format if specified
 	if ($sampleSize) {
 		die "Sample buffer length must be an integer!" if not $sampleSize =~ /\d+/;
-		syslogOutput("Dumping $sampleSize bytes samples");
+		syslogOutput("+++ Dumping $sampleSize bytes samples");
 	}
 
 	# Verify the HTTP timeout if specified
 	if ($httpTimeout) {
 		die "HTTP timeout must be an integer!" if not $httpTimeout =~ /\d+/;
-		syslogOutput("HTTP timeout: $httpTimeout seconds");
+		syslogOutput("+++ HTTP timeout: $httpTimeout seconds");
 	}
 
 	# Verify Wordpress config
@@ -694,10 +745,10 @@ sub parseXMLConfigFile {
 		if ($haveWordPressXMLRMC) { # Module WordPress::XMLRPC installed?
 			(!$wpSite || !$wpUser || !$wpPass || !$wpCategory) && die "Incomplete Wordpress configuration";
 			($sampleSize) || die "A sample buffer length must be given with Wordpress output";
-			syslogOutput("Dumping data to $wpSite/xmlrpc.php");
+			syslogOutput("+++ Dumping data to $wpSite/xmlrpc.php");
 		} 
 		else {
-			syslogOutput("Wordpress configuration disabled: Wordpress::XMLRPC not installed");
+			syslogOutput("--- Wordpress configuration disabled: Wordpress::XMLRPC not installed");
 			undef $wpSite;
 		}
 	}
@@ -708,7 +759,7 @@ sub parseXMLConfigFile {
 		my $smtp = Net::SMTP->new($smtpServer) or die "Cannot use SMTP server $smtpServer: $?";
 		$smtp->quit();
 		@smtpRecipients = split(/[, ]+/, $smtpRecipient);
-		syslogOutput("Sending SMTP notifications to <".$smtpRecipient.">");
+		syslogOutput("+++ Sending SMTP notifications to <".$smtpRecipient.">");
 	}
 
 	# Load proxies
@@ -724,13 +775,13 @@ sub parseXMLConfigFile {
 			($distanceMin > 0 && $distanceMin < 1) or die "Minimum distance must be between 0 and 1";
 			if ($distanceMaxSize) {
 				die "Distance max size must be an integer!" if not $distanceMaxSize =~ /\d+/;
-				syslogOutput("Enabled duplicate detection with distance of $distanceMin (size limit: $distanceMaxSize bytes)");
+				syslogOutput("+++ Enabled duplicate detection with distance of $distanceMin (size limit: $distanceMaxSize bytes)");
 			} else {
-				syslogOutput("Enabled duplicate detection with distance of $distanceMin");
+				syslogOutput("+++ Enabled duplicate detection with distance of $distanceMin");
 			}
 		}
 		else {
-			syslogOutput("Distance configuration disabled: Text::JaroWinkler not installed");
+			syslogOutput("--- Distance configuration disabled: Text::JaroWinkler not installed");
 			undef $distanceMin;
 		}
 	}
@@ -755,19 +806,20 @@ sub parseXMLConfigFile {
 				$sth->execute() or die "Cannot create table 'pasties'";
 				$sth = $dbh->prepare("CREATE UNIQUE INDEX pasties_idx ON pasties(id)");
 				$sth->execute() or die "Cannot create index 'pasties_idx'";
-				($debug) && print STDERR "+++ Created database " . $dbFile . "\n";
+				stdErrDebugOutput("+++ Created database " . $dbFile);
 			}
+			$sth->finish();
 			$dbh->disconnect();
 		}
 		else {
-			syslogOutput("DB support disabled: DBI not installed");
+			syslogOutput("--- DB support disabled: DBI not installed");
 			undef $dbFile;
 		}
 	}
 
 	# Follow URL
 	if ($followUrls && !$followMatching) {
-		syslogOutput("Warning: No regex defined to match URLs");
+		syslogOutput("--- Warning: No regex defined to match URLs");
 		$followMatching = ".*";	# Match everything
 	}
 
@@ -796,7 +848,7 @@ sub fetchLastPasties {
 
 	# www.pastebin.com
 	if ($webSite == PASTEBIN) {
-		($debug) && print STDERR "Loading new pasties from pastebin.com.\n";
+		stdErrDebugOutput("+++ Loading new pasties from pastebin.com");
 		my $response = $ua->get("http://pastebin.com/archive");
 		if ($response->is_success) {
 			# Load the pasties into an array
@@ -810,14 +862,14 @@ sub fetchLastPasties {
 			push(@pasties, @tempPasties);
 		}
 		else {
-			syslogOutput("Cannot fetch www.pastebin.com: " . $response->status_line);
+			syslogOutput("--- Cannot fetch www.pastebin.com: " . $response->status_line);
 			# If cannot fetch pastie and we use proxies, disable the current one!
 			(@proxies) && disableProxy($tempProxy);
 			return 1;
 		}
 	}
 	elsif ($webSite == PASTIE) {
-		#($debug) && print STDERR "Loading new pasties from pastie.org.\n";
+		stdErrDebugOutput("Loading new pasties from pastie.org");
 		my $response = $ua->get("http://pastie.org/pastes");
 		if ($response->is_success) {
 			my @tempPasties = $response->decoded_content =~ /<a href=\"(http:\/\/pastie.org\/pastes\/\d{7})\">/g;
@@ -828,14 +880,14 @@ sub fetchLastPasties {
 			push(@pasties, @tempPasties);
 		}
 		else {
-			syslogOutput("Cannot fetch www.pastie.org: " . $response->status_line);
+			syslogOutput("--- Cannot fetch www.pastie.org: " . $response->status_line);
 			# If cannot fetch pastie and we use proxies, disable the current one!
 			(@proxies) && disableProxy($tempProxy);
 			return 1;
 		}
 	}
 	elsif ($webSite == NOPASTE) {
-		#($debug) && print STDERR "Loading new pasties from nopaste.me.\n";
+		stdErrDebugOutput("Loading new pasties from nopaste.me");
 		my $response = $ua->get("http://nopaste.me/recent");
 		if ($response->is_success) {
 			my @tempPasties = $response->decoded_content =~ /<a href=\"http:\/\/nopaste.me\/paste\/([a-z0-9]+)\">/ig;
@@ -846,14 +898,14 @@ sub fetchLastPasties {
 			push(@pasties, @tempPasties);
 		}
 		else {
-			syslogOutput("Cannot fetch nopaste.me: " . $response->status_line);
-			# If cannot fetch pastie and we use proxies, disable the current one!
+			syslogOutput("--- Cannot fetch nopaste.me: " . $response->status_line);
+		# If cannot fetch pastie and we use proxies, disable the current one!
 			(@proxies) && disableProxy($tempProxy);
 			return 1;
 		}
 	}
 	elsif ($webSite == PASTESITE) {
-		($debug) && print STDERR "Loading new pasties from pastesite.com.\n";
+		stdErrDebugOutput("Loading new pasties from pastesite.com");
 		my $response = $ua->get("http://pastesite.com/recent");
 		if ($response->is_success) {
 			my @tempPasties = $response->decoded_content =~ /<a href=\"(\d+)\" title=\"View this Paste/ig;
@@ -864,7 +916,7 @@ sub fetchLastPasties {
 			push(@pasties, @tempPasties);
 		}
 		else {
-			syslogOutput("Cannot fetch pastesite.com: " . $response->status_line);
+			syslogOutput("--- Cannot fetch pastesite.com: " . $response->status_line);
 			# If cannot fetch pastie and we use proxies, disable the current one!
 			(@proxies) && disableProxy($tempProxy);
 			return 1;
@@ -897,6 +949,7 @@ sub fetchPastie {
 		($ENV{'HTTP_PROXY'}) && $ua->env_proxy;
 	}
 	$ua->agent(getRandomUA());
+	stdErrDebugOutput("Fetching $pastie");
 	my $response = $ua->get("$pastie");
 	if ($response->is_success) {
 		# Hack for pastesite.com: Extract data from the <textarea> </textarea>
@@ -911,7 +964,7 @@ sub fetchPastie {
 			return $response->decoded_content;
 		}
 	}
-	($debug) &&  print STDERR "+++ Cannot fetch pastie $pastie: " . $response->status_line . "\n";
+	stdErrDebugOutput("--- Cannot fetch pastie $pastie: " . $response->status_line);
 
 	# If cannot fetch pastie and we use proxies, disable the current one!
 	(@proxies) && disableProxy($tempProxy);
@@ -939,9 +992,11 @@ sub loadRegexFromFile {
 		} else {
 			push(@r, "1");
 		}
+		push(@r,	$n->find('reg_type')->string_value);
+		push(@r,	$n->find('alarm')->string_value);
 		push(@regexList, [ @r ]);
 	}
-	syslogOutput("Loaded " . @regexList . " regular expressions from " . $file);
+	syslogOutput("+++ Loaded " . @regexList . " regular expressions from " . $file);
 	return(1);
 }
 
@@ -958,7 +1013,7 @@ sub loadProxyFromFile {
 	}
 	close(PROXY_FD);
 	(@proxies) || die "No proxies read from $file";
-	syslogOutput("Loaded " . @proxies . " proxies from " . $file);
+	syslogOutput("+++ Loaded " . @proxies . " proxies from " . $file);
 	return(1);
 }
 
@@ -967,7 +1022,8 @@ sub loadProxyFromFile {
 #
 sub selectRandomProxy {
 	my $randomIdx = rand($#proxies);
-	# ($debug) && print STDERR "+++ Using proxy: " . $proxies[$randomIdx] . "\n";
+	#syslogOutput("+++ Using proxy: " . $proxies[$randomIdx]);
+	#stdErrDebugOutput("+++ Using proxy: " . $proxies[$randomIdx]);
 	return $proxies[$randomIdx];
 }
 
@@ -975,17 +1031,18 @@ sub selectRandomProxy {
 # Remove a faulty proxy from the proxies array
 #
 sub disableProxy {
-	my $badProxy = shift;
-	return unless defined($badProxy);
-	my $p;
-	my $i = 0;
-	foreach $p (@proxies) {
-		$i++;
-		if ($p eq $badProxy) { last; }
+	if ($disableBadProxies) {
+		my $badProxy = shift;
+		return unless defined($badProxy);
+		my $p;
+		my $i = 0;
+		foreach $p (@proxies) {
+			$i++;
+			if ($p eq $badProxy) { last; }
+		}
+		splice @proxies, $i, 1;
+		syslogOutput("--- Disabled unreliable proxy " . $badProxy . " (" . @proxies . ' active proxies)');
 	}
-	# delete $proxies[$i]; -- DEPRECATED
-	splice @proxies, $i, 1;
-	syslogOutput("Disabled unreliable proxy " . $badProxy . " (" . @proxies . ' active proxies)');
 }
 
 sub purgeOldPasties {
@@ -1001,7 +1058,7 @@ sub purgeOldPasties {
 # Handle a proper process cleanup when a signal is received
 #
 sub sigHandler {
-	syslogOutput("Received signal. Exiting.");
+	syslogOutput("+++ Received signal. Exiting.");
 	unlink($pidFile) if (-r $pidFile);
 	$caught = 1;
 }
@@ -1010,7 +1067,7 @@ sub sigHandler {
 # Reload configuration files
 #
 sub sigReload {
-	syslogOutput("Reloading config files (Thread ID " . threads->tid() . ")");
+	syslogOutput("+++ Reloading config files (Thread ID " . threads->tid() . ")");
 	parseXMLConfigFile($configFile);
 	loadRegexFromFile($regexFile);
 	(@proxies) && loadProxyFromFile($proxyFile);
@@ -1018,17 +1075,30 @@ sub sigReload {
 }
 
 #
+# If $debug output enabled, standardize display w/timestamp
+#
+sub stdErrDebugOutput {
+    my $msg = shift or return(0);
+	($debug) &&  print STDERR localtime() . " $msg\n";
+}
+
+#
 # Send Syslog message using the defined facility
 #
 sub syslogOutput {
-        my $msg = shift or return(0);
+    my $msg = shift or return(0);
 	if ($debug) {
-		print STDERR "+++ $msg\n";
+		print STDERR localtime() . " $msg\n";
 	}
 	else {
-		openlog($program, 'pid', $syslogFacility);
-		syslog('info', '%s', $msg);
-		closelog();
+		if ($^O ne 'MSWin32') {
+			openlog($program, 'pid', $syslogFacility);
+			syslog('info', '%s', $msg);		
+			closelog();
+		} 
+		else {
+			print STDERR localtime() . " +++ $msg\n";
+		}
 	}
 }
 
@@ -1055,7 +1125,7 @@ sub sendCEFEvent {
 	for $key (keys %matches) {
 		$buffer = $buffer . "cs" . $i . "=" . $matches{$key}[0] . " cs" . $i . "Label=Regex". $i . "Name cn" . $i . "=" . $matches{$key}[1]. " cn" . $i . "Label=Regex" . $i . "Count ";
 		if (++$i > 6) {
-			syslogOutput("Maximum 6 matching regex can be logged");
+			syslogOutput("--- Maximum 6 matching regex can be logged");
 			last;
 		}
 	}
@@ -1100,7 +1170,7 @@ sub dbSavePastie {
 					\"$md5\",
 					0)");
 	if (!$sth->execute()) {
-		syslogOutput("Cannot insert MD5 " . $md5 . " in DB: " . $sth->errstr() . " (Pastie: " . $pastie . ")");
+		syslogOutput("--- Cannot insert MD5 " . $md5 . " in DB: " . $sth->errstr() . " (Pastie: " . $pastie . ")");
 	}
 	$dbh->disconnect();
 	return;
@@ -1110,13 +1180,19 @@ sub dbSavePastie {
 # Search for a pastie MD5 in SQLite DB
 #
 sub dbSearchMD5 {
-	my $md5 = shift or return;
-	my $dbh = DBI->connect("dbi:SQLite:dbname=" . $dbFile)
+    try {
+		my $md5 = shift or return;
+		my $dbh = DBI->connect("dbi:SQLite:dbname=" . $dbFile)
 			or die "Cannot connect to the SQLite DB " . $dbFile . "\n";
-	my $sth = $dbh->prepare("SELECT md5 FROM pasties WHERE md5 = \"$md5\"");
-	$sth->execute();
-	$sth->fetchrow();
-	return ($sth->rows() > 0) ? 1 : 0;
+		my $sth = $dbh->prepare("SELECT md5 FROM pasties WHERE md5 = \"$md5\"");
+		$sth->execute();
+		$sth->fetchrow();
+		return ($sth->rows() > 0) ? 1 : 0;
+	}
+	except
+	{
+	  die(1);
+	}
 }
 
 #
@@ -1160,7 +1236,7 @@ sub createBlogPost {
 	$o->password($wpPass);
 	$o->proxy('http://' . $wpSite . '/xmlrpc.php');
 	if (!$o->server()) {
-		syslogOutput("Cannot connect to the Wordpress blog");
+		syslogOutput("--- Cannot connect to the Wordpress blog");
 		return;
 	}
 
@@ -1178,7 +1254,7 @@ sub createBlogPost {
 		my $ID = $o->newPost($hashref, 1);
 	};
 	if (!$ret) {
-		syslogOutput("Cannot post Wordpress article: $@");
+		syslogOutput("--- Cannot post Wordpress article: $@");
 	}
 	return;
 }
@@ -1222,7 +1298,7 @@ sub FuzzyMatch {
 			if (-r $in) {
 				use IO::Uncompress::Gunzip qw(gunzip);
 				gunzip $in => \$buffer or die "Cannot uncompress $tempDir/$tempPastie.gz";
-				($debug) && print STDERR "+++ Uncompressed $in : " . length($buffer) . " bytes\n";
+				($debug) && print STDERR localtime() . "+++ Uncompressed $in : " . length($buffer) . " bytes\n";
 			}
 		}
 		else {
@@ -1240,7 +1316,7 @@ sub FuzzyMatch {
 			if (length($buffer) > 0) { # Bug fix 2012/07/16: Only process "matched" pasties!
 				my $distance = strcmp95($newContent, $buffer, length($newContent), TOUPPER => 1, HIGH_PROB => 0);
 				if ($distance > $distanceMin) {
-					syslogOutput("Potential duplicate content found with pastie $pastie (distance: $distance)");
+					syslogOutput("*** Potential duplicate content found with pastie $pastie (distance: $distance)");
 					return 1;
 				}
 			}
@@ -1281,7 +1357,7 @@ sub validateDumpDir {
 			# If mkpath() failed, re-check the directory
 			# (Could have been created by another threat!
 			(-d $dir) && return $dir;
-			syslogOutput("mkdir(\"$dir\") failed: $!");
+			syslogOutput("--- mkdir(\"$dir\") failed: $!");
 			return "";
 		}
 	}
@@ -1324,7 +1400,7 @@ sub loadUserAgentFromFile {
 	}
 	close(UA_FD);
 	(@uas) || die "No User-Agent read from $file";
-	syslogOutput("Loaded " . @uas . " User-Agent from " . $file);
+	syslogOutput("+++ Loaded " . @uas . " User-Agent from " . $file);
 	return(1);
 }
 
