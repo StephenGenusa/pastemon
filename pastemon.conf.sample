@@ -5,15 +5,15 @@
 <pastemon>
         <!-- Core features //-->
         <core>
-                <ignore-case>yes</ignore-case>
-                <pid-file>/var/run/pastemon.pid</pid-file>
-                <regex-file>regex.conf</regex-file>
-                <sample-size>256</sample-size>
-                <proxy-config>proxies.conf</proxy-config>
+        	<ignore-case>yes</ignore-case>
+        	<pid-file>pastemon.pid</pid-file>
+        	<regex-file>regex.conf</regex-file>
+        	<sample-size>256</sample-size>
+        	<proxy-config>proxies.conf</proxy-config>
 		<ua-config>user-agents.conf</ua-config>
-                <dump-directory>/home/pastemon/dump/%Y/%M/%D</dump-directory>
-                <dump-all>yes</dump-all>
-		<compress-pasties>yes</compress-pasties>
+        	<dump-directory>dump/%Y/%M/%D</dump-directory>
+        	<dump-all>no</dump-all>
+		<compress-pasties>no</compress-pasties>
 		<http-timeout>15</http-timeout>
 		<!-- Use Jaro-Winkler distance algorithm //-->
 		<distance-min>0.95</distance-min>
@@ -22,11 +22,11 @@
 
         <!-- Websites to monitor //-->
         <websites>
-                <pastebin>yes</pastebin>
+		<pastebin>yes</pastebin>
 		<pastebin-delay>10</pastebin-delay>
-                <pastie>yes</pastie>
+		<pastie>yes</pastie>
 		<pastie-delay>120</pastie-delay>
-		<nopaste>yes</nopaste>
+		<nopaste>no</nopaste>
 		<nopaste-delay>300</nopaste-delay>
 		<pastesite>yes</pastesite>
 		<pastesite-delay>300</pastesite-delay>
@@ -34,40 +34,51 @@
 
         <!-- Follow URLs //-->
         <urls>
-                <follow>yes</follow>
-                <matching>(anonpaste|pastebin\.com|pastie\.org|pastehtml\.com|pastebay\.net|pastee\.org)</matching>
+            <follow>yes</follow>
+            <matching>(anonpaste|pastebin\.com|pastie\.org|pastehtml\.com|pastebay\.net|pastee\.org)</matching>
         </urls>
 
+        <!-- Alarm Audio Output //-->
+        <audio-output>
+            <mediafile>C:/WINDOWS/Media/tada.wav</mediafile>
+        </audio-output>
+		
         <!-- CEF Output (ArcSight) //-->
+<!--
         <cef-output>
-                <destination>10.0.0.1</destination>
-                <port>514</port>
-                <severity>3</severity>
+            <destination>10.0.0.1</destination>
+            <port>514</port>
+            <severity>3</severity>
         </cef-output>
-
+-->
         <!-- Syslog Output //-->
+<!--
         <syslog-output>
-                <facility>daemon</facility>
+            <facility>daemon</facility>
         </syslog-output>
-
+-->
+		
         <!-- Email Output //-->
+<!--
         <smtp-output>
-                <smtp-server>127.0.0.1</smtp-server>
-                <from>pastemon@rootshell.be</from>
-                <recipient>recipient@domain.com</recipient>
-                <subject>PasteMon Alert</subject>
+            <smtp-server>127.0.0.1</smtp-server>
+            <from>pastemon@rootshell.be</from>
+            <recipient>recipient@domain.com</recipient>
+            <subject>PasteMon Alert</subject>
         </smtp-output>
-
+-->
         <!-- Wordpress Output (XMLRPC) //-->
+<!--
         <wordpress-output>
-                <site>www.myblog.com</site>
-                <user>editor</user>
-                <password>averystrongpassword</password>
-                <category>favorite</category>
+            <site>www.myblog.com</site>
+            <user>editor</user>
+            <password>averystrongpassword</password>
+            <category>favorite</category>
         </wordpress-output>
+-->
 
 	<!-- SQLite Support //-->
 	<db-output>
-		<db-file>/home/pastemon/pastemon.db</db-file>
+	    <db-file>pastemon.db</db-file>
 	</db-output>
 </pastemon>
